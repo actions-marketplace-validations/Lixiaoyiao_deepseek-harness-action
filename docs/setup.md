@@ -36,10 +36,10 @@ npm create deepseek-harness-action@latest -- --mode both --dsh-mode native
 
 The installer creates `.github/workflows/` when necessary and refuses to
 overwrite an existing target workflow. It does not add `DEEPSEEK_API_KEY`,
-commit or push changes, or open a pull request. Installer v0.2.0 is built only
-after the formal v0.8.0 tag, GitHub Release, and release canary agree; its
+commit or push changes, or open a pull request. Installer v0.2.1 is built only
+after the formal v0.8.2 tag, GitHub Release, and release canary agree; its
 workflows pin immutable commit
-`86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1`, not a candidate SHA, floating tag,
+`8d336a00c4977634f95e12c94045f3f4fada68c5`, not a candidate SHA, floating tag,
 or branch.
 
 After the installer succeeds:
@@ -85,11 +85,10 @@ uses: Lixiaoyiao/deepseek-harness-action@v0.8.2
 ```
 
 For production, replace the tag with the full immutable commit SHA published
-for that release. The independently versioned installer v0.2.0 continues to
-generate workflows bound to the formal v0.8.0 commit:
+for that release. The independently versioned installer v0.2.1 generates workflows bound to the formal v0.8.2 commit:
 
 ```yaml
-uses: Lixiaoyiao/deepseek-harness-action@86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1
+uses: Lixiaoyiao/deepseek-harness-action@8d336a00c4977634f95e12c94045f3f4fada68c5
 ```
 
 Do not use `main`, `latest`, a version range, a candidate SHA, or another

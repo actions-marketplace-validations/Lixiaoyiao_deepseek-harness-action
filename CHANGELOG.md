@@ -3,6 +3,17 @@
 Notable user-facing changes are recorded here. This project follows semantic
 versioning for published action releases.
 
+## Installer 0.2.1 - 2026-09-19
+
+- Updated the independently versioned create package to bind generated workflows
+  to the formal v0.8.2 Action commit `8d336a00c4977634f95e12c94045f3f4fada68c5`.
+- Updated installer documentation, CLI setup links, release-contract assertions,
+  and all controlled/native installation fixtures to that immutable binding.
+- Retained controlled as the default, native as an explicit opt-in, source
+  release tokens, overwrite protection, and the audited DSH `0.1.1-rc.2`.
+- Installer source and npm publication remain separate from the immutable
+  Action tag; the package must be packed with the verified Action release SHA.
+
 ## [0.8.2] - 2026-09-19
 
 ### Fixed
