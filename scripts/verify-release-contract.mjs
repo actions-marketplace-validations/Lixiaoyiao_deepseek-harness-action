@@ -57,9 +57,10 @@ const manifest = JSON.parse(manifestText);
 const lock = JSON.parse(lockText);
 const installerManifest = JSON.parse(installerManifestText);
 const installerLock = JSON.parse(installerLockText);
-const installerVersion = "0.2.0";
-const installerActionTag = "v0.8.0";
-const installerActionReleaseSha = "86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1";
+const installerVersion = "0.2.1";
+const installerActionTag = "v0.8.2";
+const installerSourceTag = `create-deepseek-harness-action-v${installerVersion}`;
+const installerActionReleaseSha = "8d336a00c4977634f95e12c94045f3f4fada68c5";
 const directDependencies = {
   ...(manifest.dependencies ?? {}),
   ...(manifest.devDependencies ?? {}),
@@ -247,8 +248,8 @@ assert.equal(
   "installer root lock version drifted",
 );
 assert.ok(
-  installerRuntime.includes(`/blob/${installerActionTag}/docs/setup.md`),
-  `installer documentation must bind to the ${installerActionTag} release`,
+  installerRuntime.includes(`/blob/${installerSourceTag}/docs/setup.md`),
+  `installer documentation must bind to the ${installerSourceTag} source tag`,
 );
 assert.ok(
   installerReadme.includes(`Version \`${installerVersion}\``) &&

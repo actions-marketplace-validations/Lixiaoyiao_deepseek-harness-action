@@ -9,10 +9,11 @@ and experimental native compositions. It keeps the
 audited DSH `0.1.1-rc.2` family exact-pinned and does not add Session/Resume, an
 Action-owned GitHub MCP backend, or another GitHub capability. Its formal
 annotated tag, GitHub Release, and release canary must resolve to the same
-qualified exact-main commit. The independently versioned installer remains
-`0.2.0` with its formal v0.8.0 Action binding until the separate `0.2.1`
-companion is reviewed and published after v0.8.2 qualification. Never substitute
-a guessed Action SHA while preparing that companion.
+qualified exact-main commit. The independently versioned installer `0.2.1`
+binds to the formal v0.8.2 Action commit. Its source is reviewed and tagged
+separately, and its npm package is published only after that Action's formal
+release canary succeeds. Never substitute a guessed or installer-source SHA
+for the immutable Action release binding.
 
 ## Release invariants
 
@@ -76,11 +77,11 @@ For an Action version bump, update every release surface together:
 6. Any release-specific verification fixture or documentation.
 
 The standalone `create-deepseek-harness-action` package has its own semantic
-version. Its v0.8.0 companion release is `0.2.0`; do not change it to the Action
+version. Its v0.8.2 companion release is `0.2.1`; do not change it to the Action
 version. Keep its package manifest, npm lock/workspace metadata, CLI tests,
 controlled/native templates, and pack-time release-SHA contract aligned. The
-formal v0.8.0 Action binding is
-`86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1`.
+formal v0.8.2 Action binding is
+`8d336a00c4977634f95e12c94045f3f4fada68c5`.
 
 For a DSH version bump, additionally:
 
@@ -308,9 +309,9 @@ then create a detached staging checkout. Each tag-resolution loop accepts an
 annotated or lightweight tag and must end at its expected commit:
 
 ```bash
-release_tag="v0.8.0"
-release_sha="86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1"
-installer_tag="create-deepseek-harness-action-v0.2.0"
+release_tag="v0.8.2"
+release_sha="8d336a00c4977634f95e12c94045f3f4fada68c5"
+installer_tag="create-deepseek-harness-action-v0.2.1"
 installer_source_sha="${INSTALLER_SOURCE_SHA:?Set the reviewed installer source commit SHA}"
 repository="Lixiaoyiao/deepseek-harness-action"
 sha_pattern='^[0-9a-f]{40}$'
@@ -366,7 +367,7 @@ tar -xzf "$tarball" -C "$installer_stage/unpacked"
 ```
 
 Inspect the packed artifact, not only the source tree. It must contain version
-`0.2.0`, expose the `create-deepseek-harness-action` executable, contain no
+`0.2.1`, expose the `create-deepseek-harness-action` executable, contain no
 unresolved release token or floating Action reference, and generate controlled
 and native workflows bound only to `release_sha`:
 
@@ -377,7 +378,7 @@ import { readFile } from "node:fs/promises";
 
 const manifest = JSON.parse(await readFile(process.argv[2], "utf8"));
 assert.equal(manifest.name, "create-deepseek-harness-action");
-assert.equal(manifest.version, "0.2.0");
+assert.equal(manifest.version, "0.2.1");
 assert.ok(manifest.bin?.["create-deepseek-harness-action"]);
 NODE
 
@@ -437,7 +438,7 @@ that would rerun packing with an unreviewed environment:
 ```bash
 npm whoami --registry=https://registry.npmjs.org/
 npm publish "$tarball" --access public --registry=https://registry.npmjs.org/
-npm view create-deepseek-harness-action@0.2.0 \
+npm view create-deepseek-harness-action@0.2.1 \
   name version dist-tags --json --registry=https://registry.npmjs.org/
 ```
 
@@ -452,17 +453,17 @@ mkdir "$installer_stage/public-review" \
 (
   cd "$installer_stage/public-review"
   npm_config_registry=https://registry.npmjs.org/ \
-    npm create deepseek-harness-action@0.2.0 -- --mode review
+    npm create deepseek-harness-action@0.2.1 -- --mode review
 )
 (
   cd "$installer_stage/public-commands-native"
   npm_config_registry=https://registry.npmjs.org/ \
-    npm create deepseek-harness-action@0.2.0 -- --mode commands --dsh-mode native
+    npm create deepseek-harness-action@0.2.1 -- --mode commands --dsh-mode native
 )
 (
   cd "$installer_stage/public-both"
   npm_config_registry=https://registry.npmjs.org/ \
-    npm create deepseek-harness-action@0.2.0 -- --mode both
+    npm create deepseek-harness-action@0.2.1 -- --mode both
 )
 ```
 
@@ -472,4 +473,4 @@ exactly one `release_sha` Action reference; and checkout, permission, Docker,
 validation, credential, and overwrite boundaries remain intact. Then remove the
 disposable worktree and staging directory. npm versions and both release tags
 are immutable; a bad published installer must be fixed with a new installer
-patch version rather than replacing `0.2.0`.
+patch version rather than replacing `0.2.1`.
