@@ -46,6 +46,17 @@ describe("trusted core E2E workflow", () => {
     expect(integrity).toContain(`allowed-tools: '["workspace.edit","native.bash"]'`);
     expect(integrity).toContain('max-turns: "1"');
     expect(integrity).not.toContain("permission-profile: standard");
+    expect(integrity).toContain("deepseek-api-key: dsh-e2e-integrity-fixture-key");
+    expect(integrity).toContain("base-url: ${{ steps.integrity_fixture.outputs.base_url }}");
+    expect(integrity).toContain("DSH_E2E_INTEGRITY_FIXTURE");
+    expect(integrity).not.toContain("secrets.DEEPSEEK_API_KEY");
+    const start = stepBlock(workflow, "Start deterministic integrity fixture");
+    expect(start).toContain("node .github/e2e/integrity-llm.mjs");
+    expect(start).not.toContain("secrets.");
+    expect(stepBlock(workflow, "Stop deterministic integrity fixture")).toContain("if: always()");
+    expect(stepBlock(workflow, "Assert integrity failure")).toContain(
+      'map(.phase) == ["bash-issued", "bash-observed"]',
+    );
   });
 
   it("locks controlled tool-policy semantics into the strict and MCP golden paths", () => {
@@ -63,6 +74,61 @@ describe("trusted core E2E workflow", () => {
     expect(mcp).toContain(
       '.toolPolicy.requestedTools == ["mcp.fixture.echo","mcp.fixture.hidden","workspace.read","workspace.search"]',
     );
+  });
+
+  it("requires an unknown MCP proof from the real model without exposing its expected value", () => {
+    const start = stepBlock(workflow, "Start real Streamable HTTP MCP fixture");
+    const launch = stepBlock(workflow, "MCP allow and deny");
+    const assertion = stepBlock(workflow, "Assert MCP allow/deny and receipts");
+    const report = stepBlock(workflow, "Report bounded MCP proof diagnostics");
+    const artifact = stepBlock(workflow, "Preserve MCP execution evidence");
+
+    expect(launch).toContain("deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}");
+    expect(launch).toContain("taskOutput.proof");
+    expect(launch).toContain('"proof":{"type":"string","minLength":48,"maxLength":48}');
+    expect(launch).not.toMatch(/expectedProof|expected_proof|\.endpoint|const.*proof/iu);
+    expect(launch).toContain('maxCalls":1');
+    expect(launch).toContain("disallowed-tools: '[\"mcp.fixture.hidden\"]'");
+    expect(start).toContain('echo "::add-mask::$proof"');
+    expect(assertion).toContain("if: always()");
+    expect(assertion.indexOf("mcp-proof-evidence.mjs capture")).toBeLessThan(
+      assertion.indexOf("jq -e"),
+    );
+    expect(assertion).toContain('.actionOutcome == "success" and .proofMatches == true');
+    expect(assertion).toContain('[[ "$(wc -l < "$MCP_AUDIT")" -eq 1 ]]');
+    expect(assertion).toContain("length == 1");
+    expect(assertion).toContain('all(.id != "mcp.fixture.hidden")');
+    expect(report).toContain("if: always()");
+    expect(report).not.toMatch(/RESULT_JSON|task-output|summary:|MCP_ENDPOINT|DEEPSEEK_API_KEY/u);
+    expect(artifact).toContain("if: always()");
+    expect(artifact).toContain("dsh-e2e-mcp-evidence.json");
+    expect(artifact).toContain("dsh-e2e-mcp-audit.jsonl");
+    expect(artifact).not.toMatch(/endpoint|server\.log|\.stdout|result-json/u);
+  });
+
+  it("requires a source from a real Web Search and records evidence before failed assertions", () => {
+    const launch = stepBlock(workflow, "Real mediated Web Search");
+    const assertion = stepBlock(workflow, "Assert Web Search mediation and receipt");
+    const artifact = stepBlock(workflow, "Preserve bounded Web Search evidence");
+    expect(launch).toContain("deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}");
+    expect(launch).toContain("actual DSH runtime web_search tool exactly once");
+    expect(launch).toContain("first source returned by that tool");
+    expect(launch).toContain("site:api-docs.deepseek.com context caching");
+    expect(launch).toContain("allowed-tools: '[\"native.web-search\"]'");
+    expect(launch).toContain("task-output-schema:");
+    expect(launch).not.toMatch(
+      /base-url:|mcp-config:|isolation: none|official DeepSeek Harness repository/u,
+    );
+    expect(assertion).toContain("if: always()");
+    expect(assertion.indexOf("node .github/e2e/web-search-evidence.mjs")).toBeLessThan(
+      assertion.indexOf("jq -e"),
+    );
+    expect(assertion).toContain(".receiptCount == 1 and .completedWebSearchCount == 1");
+    expect(assertion).toContain('.permissions.network == "mediated-web"');
+    expect(assertion).toContain(".loop.dshToolReceipts // []");
+    expect(artifact).toContain("if: always()");
+    expect(artifact).toContain("dsh-e2e-web-evidence.json");
+    expect(artifact).not.toMatch(/result-json|\.log|\.stdout/u);
   });
 
   it("runs an exact-candidate native read-only smoke with observed DSH inventory", () => {
@@ -250,6 +316,11 @@ describe("trusted core E2E workflow", () => {
     expect(creation).toContain('--arg parent "$CANDIDATE_SHA"');
     expect(creation).toContain('--arg parent "$base_sha"');
     expect(creation).not.toContain('-f sha="$CANDIDATE_SHA" >/dev/null');
+    expect(creation).toContain(
+      'node .github/e2e/fixture-ref.mjs create "$base_branch" "$base_sha"',
+    );
+    expect(creation).toContain('node .github/e2e/fixture-ref.mjs create "$branch" "$head_sha"');
+    expect(creation).not.toContain('gh api --method POST "repos/$REPOSITORY/git/refs"');
   });
 
   it("asserts generic receipts and verifies typed payload effects through remote state", () => {
@@ -298,11 +369,14 @@ describe("trusted core E2E workflow", () => {
     expect(cleanup).toContain(".tree | length == 3");
     expect(cleanup).toContain("git/blobs/$blob_sha");
     expect(cleanup).toContain(
-      'gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BRANCH"',
+      'node .github/e2e/fixture-ref.mjs delete "$CHECKS_BRANCH" "$ref_sha"',
     );
     expect(cleanup).toContain(
-      'gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BASE_BRANCH"',
+      'node .github/e2e/fixture-ref.mjs delete "$CHECKS_BASE_BRANCH" "$ref_sha"',
     );
+    expect(cleanup.match(/\.status == "404" or \.status == 404/gu)).toHaveLength(2);
+    expect(cleanup).toContain("Fixture ref preflight could not confirm absence.");
+    expect(cleanup).not.toMatch(/ref_sha=.*\|\| return 0/u);
     expect(cleanup).not.toContain("matching-refs");
   });
 

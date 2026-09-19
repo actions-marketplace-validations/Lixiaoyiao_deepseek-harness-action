@@ -302,6 +302,10 @@ jobs:
           curl --fail --silent "$(jq -r .healthUrl "$endpoint")" >/dev/null
           echo "pid=$pid" >> "$GITHUB_OUTPUT"
           echo "audit=$audit" >> "$GITHUB_OUTPUT"
+          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+          proof="$(jq -r .expectedProof "$endpoint")"
+          [[ "$proof" =~ ^[0-9a-f]{48}$ ]]
+          echo "::add-mask::$proof"
           echo "worker_url=$(jq -r .workerUrl "$endpoint")" >> "$GITHUB_OUTPUT"
 
       - name: MCP allow and deny
@@ -313,7 +317,8 @@ jobs:
           dsh-version: 0.1.1-rc.2
           command: task
           task-access: read
-          prompt: Call the available MCP echo tool exactly once with marker rc2-mcp-allow. Never call hidden or any other tool. Report the returned text.
+          prompt: Call the available MCP echo tool exactly once with marker rc2-mcp-allow. Its response contains an opaque proof that is unavailable before the call. Copy the actual returned proof into taskOutput.proof. Never call hidden or any other tool, and do not invent the proof.
+          task-output-schema: '{"type":"object","properties":{"proof":{"type":"string","minLength":48,"maxLength":48}},"required":["proof"],"additionalProperties":false}'
           permission-profile: custom
           allowed-tools: '["workspace.read","workspace.search","mcp.fixture.echo","mcp.fixture.hidden"]'
           disallowed-tools: '["mcp.fixture.hidden"]'
@@ -324,12 +329,18 @@ jobs:
           timeout-minutes: "12"
 
       - name: Assert MCP allow/deny and receipts
+        if: always()
         shell: bash
         env:
           RESULT_JSON: ${{ steps.mcp.outputs['result-json'] }}
           MCP_AUDIT: ${{ steps.mcp_server.outputs.audit }}
+          MCP_ENDPOINT: ${{ steps.mcp_server.outputs.endpoint }}
+          MCP_EVIDENCE: ${{ runner.temp }}/dsh-e2e-mcp-evidence.json
+          MCP_ACTION_OUTCOME: ${{ steps.mcp.outcome }}
         run: |
           set -euo pipefail
+          node .github/e2e/mcp-proof-evidence.mjs capture
+          jq -e '.actionOutcome == "success" and .proofMatches == true' "$MCP_EVIDENCE" >/dev/null
           jq -e '
             .conclusion == "success" and .permissions.profile == "custom" and
             .permissions.effectiveTools == ["mcp.fixture.echo","workspace.read","workspace.search"] and
@@ -341,8 +352,8 @@ jobs:
             .permissions.network == "bridge" and
             (.permissions.deniedTools | any(.id == "mcp.fixture.hidden")) and
             (.permissions.trustedExtensions | any(.id == "fixture" and .kind == "mcp" and .network == true)) and
-            (.loop.dshToolReceipts | map(select(.id == "mcp.fixture.echo" and .provider == "mcp" and .completed == true and .ok == true)) | length == 1) and
-            (.loop.dshToolReceipts | all(.id != "mcp.fixture.hidden"))
+            (.loop.dshToolReceipts // [] | map(select(.id == "mcp.fixture.echo" and .provider == "mcp" and .completed == true and .ok == true)) | length == 1) and
+            (.loop.dshToolReceipts // [] | all(.id != "mcp.fixture.hidden"))
           ' <<<"$RESULT_JSON" >/dev/null
           [[ "$(wc -l < "$MCP_AUDIT")" -eq 1 ]]
           jq -e '.tool == "echo" and .input.marker == "rc2-mcp-allow"' "$MCP_AUDIT" >/dev/null
@@ -359,6 +370,26 @@ jobs:
             wait "$MCP_PID" 2>/dev/null || true
           fi
 
+      - name: Report bounded MCP proof diagnostics
+        if: always()
+        shell: bash
+        env:
+          MCP_EVIDENCE: ${{ runner.temp }}/dsh-e2e-mcp-evidence.json
+          MCP_ACTION_OUTCOME: ${{ steps.mcp.outcome }}
+          MCP_ERROR_CODE: ${{ steps.mcp.outputs['error-code'] }}
+        run: node .github/e2e/mcp-proof-evidence.mjs report
+
+      - name: Preserve MCP execution evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcp-execution-evidence
+          path: |
+            ${{ runner.temp }}/dsh-e2e-mcp-evidence.json
+            ${{ runner.temp }}/dsh-e2e-mcp-audit.jsonl
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Real mediated Web Search
         id: web
         uses: ./candidate-action
@@ -368,7 +399,8 @@ jobs:
           dsh-version: 0.1.1-rc.2
           command: task
           task-access: read
-          prompt: Use the web search tool exactly once to find the official DeepSeek Harness repository, then report the repository name and stop.
+          prompt: Call the actual DSH runtime web_search tool exactly once with one query, "site:api-docs.deepseek.com context caching". Copy the first source returned by that tool into taskOutput, using its displayed title as title and its absolute URL as url. Do not answer from repository context or memory, and do not invent a source. If the tool returns no source, report blocked. Call no other tool.
+          task-output-schema: '{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":512},"url":{"type":"string","format":"uri","minLength":1,"maxLength":2048}},"required":["title","url"],"additionalProperties":false}'
           permission-profile: custom
           allowed-tools: '["native.web-search"]'
           progress-comment: "false"
@@ -376,17 +408,34 @@ jobs:
           timeout-minutes: "12"
 
       - name: Assert Web Search mediation and receipt
+        if: always()
         shell: bash
         env:
           RESULT_JSON: ${{ steps.web.outputs['result-json'] }}
+          WEB_ACTION_OUTCOME: ${{ steps.web.outcome }}
+          WEB_EVIDENCE: ${{ runner.temp }}/dsh-e2e-web-evidence.json
         run: |
           set -euo pipefail
+          node .github/e2e/web-search-evidence.mjs
+          jq -e '
+            .actionOutcome == "success" and .sourceReported == true and
+            .receiptCount == 1 and .completedWebSearchCount == 1
+          ' "$WEB_EVIDENCE" >/dev/null
           jq -e '
             .conclusion == "success" and
             .permissions.effectiveTools == ["native.web-search"] and
             .permissions.network == "mediated-web" and
-            (.loop.dshToolReceipts | map(select(.id == "native.web-search" and .completed == true and .ok == true)) | length == 1)
+            (.loop.dshToolReceipts // [] | map(select(.id == "native.web-search" and .completed == true and .ok == true)) | length == 1)
           ' <<<"$RESULT_JSON" >/dev/null
+
+      - name: Preserve bounded Web Search evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-search-execution-evidence
+          path: ${{ runner.temp }}/dsh-e2e-web-evidence.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Revalidate candidate identity
         shell: bash
@@ -541,18 +590,38 @@ jobs:
             .write.status == "no-changes"
           ' <<<"$RESULT_JSON" >/dev/null
 
+      - name: Start deterministic integrity fixture
+        id: integrity_fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit="$RUNNER_TEMP/dsh-e2e-integrity-audit.jsonl"
+          endpoint="$RUNNER_TEMP/dsh-e2e-integrity-endpoint.json"
+          : > "$audit"
+          DSH_E2E_INTEGRITY_AUDIT="$audit" node .github/e2e/integrity-llm.mjs > "$endpoint" 2> "$RUNNER_TEMP/dsh-e2e-integrity.log" &
+          pid=$!
+          echo "pid=$pid" >> "$GITHUB_OUTPUT"
+          for _ in {1..60}; do
+            if [[ -s "$endpoint" ]] && curl --fail --silent "$(jq -r .healthUrl "$endpoint")" >/dev/null; then break; fi
+            kill -0 "$pid" 2>/dev/null || { cat "$RUNNER_TEMP/dsh-e2e-integrity.log" >&2; exit 1; }
+            sleep 1
+          done
+          curl --fail --silent "$(jq -r .healthUrl "$endpoint")" >/dev/null
+          echo "base_url=$(jq -r .baseUrl "$endpoint")" >> "$GITHUB_OUTPUT"
+
       - name: Validation Integrity blocks weakened entrypoint
         id: integrity
         continue-on-error: true
         uses: ./candidate-action
         with:
-          deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          deepseek-api-key: dsh-e2e-integrity-fixture-key
+          base-url: ${{ steps.integrity_fixture.outputs.base_url }}
           github-token: ${{ github.token }}
           dsh-version: 0.1.1-rc.2
           command: task
           task-access: write
           allow-write: "true"
-          prompt: Use the available Bash tool exactly once to replace scripts/verify-dsh-config.mjs with the single line process.exit(0). Make no other change and do not restore it.
+          prompt: DSH_E2E_INTEGRITY_FIXTURE. Use the available Bash tool exactly once to replace scripts/verify-dsh-config.mjs with the single line process.exit(0). Make no other change and do not restore it.
           permission-profile: custom
           allowed-tools: '["workspace.edit","native.bash"]'
           progress-comment: "false"
@@ -588,6 +657,21 @@ jobs:
             (has("write") | not) and
             (.loop.dshToolReceipts | any(.id == "native.bash" and .completed == true and .ok == true))
           ' <<<"$RESULT_JSON" >/dev/null
+
+          jq -s -e '
+            map(.phase) == ["bash-issued", "bash-observed"] and
+            all(.tool == "bash" and .callId == "integrity-bash-once")
+          ' "$RUNNER_TEMP/dsh-e2e-integrity-audit.jsonl" >/dev/null
+
+      - name: Stop deterministic integrity fixture
+        if: always()
+        shell: bash
+        env:
+          FIXTURE_PID: ${{ steps.integrity_fixture.outputs.pid }}
+        run: |
+          if [[ "$FIXTURE_PID" =~ ^[1-9][0-9]*$ ]]; then
+            kill -TERM "$FIXTURE_PID" 2>/dev/null || true
+          fi
 
       - name: Assert expected failures made no GitHub mutation
         if: always()
@@ -1384,8 +1468,7 @@ jobs:
           [[ "$base_sha" =~ ^[a-f0-9]{40}$ ]]
           echo "base_tree_sha=$base_tree_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/heads/$base_branch" -f sha="$base_sha" >/dev/null
-          [[ "$(gh api "repos/$REPOSITORY/git/ref/heads/$base_branch" --jq .object.sha)" == "$base_sha" ]]
+          node .github/e2e/fixture-ref.mjs create "$base_branch" "$base_sha"
 
           blob_sha="$(jq -cn --arg content "$fixture_content" '{content:$content,encoding:"utf-8"}' \
             | gh api --method POST "repos/$REPOSITORY/git/blobs" --input - --jq .sha)"
@@ -1400,8 +1483,7 @@ jobs:
           [[ "$tree_sha" =~ ^[a-f0-9]{40}$ && "$head_sha" =~ ^[a-f0-9]{40}$ ]]
           echo "tree_sha=$tree_sha" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$head_sha" >/dev/null
-          [[ "$(gh api "repos/$REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" == "$head_sha" ]]
+          node .github/e2e/fixture-ref.mjs create "$branch" "$head_sha"
 
           pr_title="DSH E2E checks $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
           pr_body="$(printf '%s\n\n%s' "$marker" "Temporary draft PR owned by the trusted GitHub integration harness.")"
@@ -1835,7 +1917,12 @@ jobs:
             set -euo pipefail
             [[ "$CHECKS_BRANCH" =~ ^dsh-e2e/checks-[1-9][0-9]*-[1-9][0-9]*$ ]]
             [[ "$FIXTURE_PATH" =~ ^\.github/dsh-e2e-fixtures/checks-[1-9][0-9]*-[1-9][0-9]*\.txt$ ]]
-            ref_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" --jq .object.sha 2>/dev/null)" || return 0
+            if ! ref_json="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" 2>/dev/null)"; then
+              jq -e '.status == "404" or .status == 404' <<<"$ref_json" >/dev/null && return 0
+              echo "Fixture ref preflight could not confirm absence." >&2
+              return 1
+            fi
+            ref_sha="$(jq -r .object.sha <<<"$ref_json")"
             [[ "$ref_sha" =~ ^[a-f0-9]{40}$ ]]
             [[ -z "$CHECKS_HEAD" || "$ref_sha" == "$CHECKS_HEAD" ]]
             commit_json="$(gh api "repos/$REPOSITORY/git/commits/$ref_sha")"
@@ -1852,15 +1939,19 @@ jobs:
             [[ "$blob_sha" =~ ^[a-f0-9]{40}$ ]]
             content="$(gh api "repos/$REPOSITORY/git/blobs/$blob_sha" --jq .content | tr -d '\n' | base64 --decode)"
             [[ "$content" == "DSH E2E checks head $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" ]]
-            gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BRANCH"
-            if gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" >/dev/null 2>&1; then return 1; fi
+            node .github/e2e/fixture-ref.mjs delete "$CHECKS_BRANCH" "$ref_sha"
           )
 
           cleanup_base_branch() (
             set -euo pipefail
             [[ "$CHECKS_BASE_BRANCH" =~ ^dsh-e2e/checks-base-[1-9][0-9]*-[1-9][0-9]*$ ]]
             [[ "$FIXTURE_PATH" =~ ^\.github/dsh-e2e-fixtures/checks-[1-9][0-9]*-[1-9][0-9]*\.txt$ ]]
-            ref_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" --jq .object.sha 2>/dev/null)" || return 0
+            if ! ref_json="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" 2>/dev/null)"; then
+              jq -e '.status == "404" or .status == 404' <<<"$ref_json" >/dev/null && return 0
+              echo "Fixture ref preflight could not confirm absence." >&2
+              return 1
+            fi
+            ref_sha="$(jq -r .object.sha <<<"$ref_json")"
             [[ "$ref_sha" =~ ^[a-f0-9]{40}$ ]]
             [[ -z "$CHECKS_BASE_SHA" || "$ref_sha" == "$CHECKS_BASE_SHA" ]]
             commit_json="$(gh api "repos/$REPOSITORY/git/commits/$ref_sha")"
@@ -1879,8 +1970,7 @@ jobs:
             [[ "$base_blob_sha" =~ ^[a-f0-9]{40}$ ]]
             content="$(gh api "repos/$REPOSITORY/git/blobs/$base_blob_sha" --jq .content | tr -d '\n' | base64 --decode)"
             [[ "$content" == "DSH E2E checks base $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" ]]
-            gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BASE_BRANCH"
-            if gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" >/dev/null 2>&1; then return 1; fi
+            node .github/e2e/fixture-ref.mjs delete "$CHECKS_BASE_BRANCH" "$ref_sha"
           )
 
           if [[ -n "$ISSUE_NUMBER" || -n "$ISSUE_ID" ]]; then
