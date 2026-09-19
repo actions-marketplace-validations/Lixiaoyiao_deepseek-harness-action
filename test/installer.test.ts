@@ -16,8 +16,8 @@ import {
 } from "../packages/create-deepseek-harness-action/src/installer.mjs";
 
 const execFileAsync = promisify(execFile);
-const INSTALLER_VERSION = "0.2.0";
-const RELEASE_SHA = "1234567890abcdef1234567890abcdef12345678";
+const INSTALLER_VERSION = "0.2.1";
+const RELEASE_SHA = "8d336a00c4977634f95e12c94045f3f4fada68c5";
 const RELEASE_TOKEN = "__DSH_ACTION_RELEASE_SHA__";
 const DSH_MODE_TOKEN = "__DSH_MODE_INPUT__";
 const packageRoot = new URL("../packages/create-deepseek-harness-action/", import.meta.url);
@@ -85,7 +85,7 @@ afterAll(async () => {
 });
 
 describe("create-deepseek-harness-action release build", () => {
-  it("declares the independent 0.2.0 npm create package", async () => {
+  it("declares the independent 0.2.1 npm create package", async () => {
     const manifest: unknown = JSON.parse(
       await readFile(new URL("package.json", packageRoot), "utf8"),
     );
@@ -149,7 +149,7 @@ describe("create-deepseek-harness-action release build", () => {
       expect(runtime).not.toContain(DSH_MODE_TOKEN);
     }
     await expect(readFile(join(builtPackage, "installer.mjs"), "utf8")).resolves.toContain(
-      "/blob/v0.8.0/docs/setup.md",
+      "/blob/create-deepseek-harness-action-v0.2.1/docs/setup.md",
     );
 
     for (const [index, invalidReleaseSha] of [

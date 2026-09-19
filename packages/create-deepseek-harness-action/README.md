@@ -27,7 +27,7 @@ Valid workflow modes are `review`, `commands`, and `both`; valid DSH modes are
 not add secrets, commit, push, or open a pull request. Existing workflow files
 are never overwritten.
 
-Version `0.2.0` is built only after the formal v0.8.0 Action tag, GitHub Release,
-and release canary agree. Its generated workflows pin the immutable v0.8.0
-release commit `86fff4c4527694c7eefdc65c6cf7a633b5ea8cb1`, never a candidate SHA,
+Version `0.2.1` is built only after the formal v0.8.2 Action tag, GitHub Release,
+and release canary agree. Its generated workflows pin the immutable v0.8.2
+release commit `8d336a00c4977634f95e12c94045f3f4fada68c5`, never a candidate SHA,
 floating tag, or branch. The audited DSH version remains `0.1.1-rc.2`.
