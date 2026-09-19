@@ -177,6 +177,17 @@ authority. A final JSON answer without that receipt fails even if its text
 looks correct. Always-running diagnostics preserve safe outcome/count fields
 when the Action or its assertion fails; they do not print model text or URLs.
 
+Fixture ref creation and deletion each send at most one write, followed by at
+most five postcondition reads; deletion also performs one immediate identity
+read before writing. The helper accepts only this run/attempt's checks refs
+and the expected full commit SHA, within a 20-second total deadline and
+5-second request caps. It may confirm an ambiguous transport, 404, or 5xx write
+response through reads, but never resends the write. Different identities or
+SHAs, unconfirmed reads, authentication/permission failures, quota responses,
+and other definite write rejections fail the gate. The preceding commit, tree,
+blob, Issue and PR ownership checks remain mandatory, and diagnostics contain
+only operation, stage, HTTP status and attempt number.
+
 | Area                        | Required evidence                                                                                                                                                                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Strict read-only            | Controlled `github-action` Profile and official Bundle identity with no write capability                                                                                                                                                                 |

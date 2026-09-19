@@ -316,6 +316,11 @@ describe("trusted core E2E workflow", () => {
     expect(creation).toContain('--arg parent "$CANDIDATE_SHA"');
     expect(creation).toContain('--arg parent "$base_sha"');
     expect(creation).not.toContain('-f sha="$CANDIDATE_SHA" >/dev/null');
+    expect(creation).toContain(
+      'node .github/e2e/fixture-ref.mjs create "$base_branch" "$base_sha"',
+    );
+    expect(creation).toContain('node .github/e2e/fixture-ref.mjs create "$branch" "$head_sha"');
+    expect(creation).not.toContain('gh api --method POST "repos/$REPOSITORY/git/refs"');
   });
 
   it("asserts generic receipts and verifies typed payload effects through remote state", () => {
@@ -364,11 +369,14 @@ describe("trusted core E2E workflow", () => {
     expect(cleanup).toContain(".tree | length == 3");
     expect(cleanup).toContain("git/blobs/$blob_sha");
     expect(cleanup).toContain(
-      'gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BRANCH"',
+      'node .github/e2e/fixture-ref.mjs delete "$CHECKS_BRANCH" "$ref_sha"',
     );
     expect(cleanup).toContain(
-      'gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BASE_BRANCH"',
+      'node .github/e2e/fixture-ref.mjs delete "$CHECKS_BASE_BRANCH" "$ref_sha"',
     );
+    expect(cleanup.match(/\.status == "404" or \.status == 404/gu)).toHaveLength(2);
+    expect(cleanup).toContain("Fixture ref preflight could not confirm absence.");
+    expect(cleanup).not.toMatch(/ref_sha=.*\|\| return 0/u);
     expect(cleanup).not.toContain("matching-refs");
   });
 

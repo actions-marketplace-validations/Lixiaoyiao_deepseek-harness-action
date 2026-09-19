@@ -3,7 +3,7 @@
 Notable user-facing changes are recorded here. This project follows semantic
 versioning for published action releases.
 
-## [0.8.2] - 2026-09-12
+## [0.8.2] - 2026-09-19
 
 ### Fixed
 
@@ -40,6 +40,9 @@ versioning for published action releases.
   one successful DSH receipt, with safe outcome/count artifacts preserved even
   when the assertion fails. An answer copied from repository context cannot
   substitute for actual search execution.
+- Made Core fixture ref writes occur at most once, followed by bounded reads
+  that confirm the exact intended state. Ownership checks remain mandatory,
+  and permission or quota failures cannot be treated as missing refs.
 - Added one bounded, complete Issue snapshot reread when only its timestamp
   changes during collection. Original identity, state, content and trigger-text
   bindings stay fixed; comments are collected again, and the final timestamp

@@ -1468,8 +1468,7 @@ jobs:
           [[ "$base_sha" =~ ^[a-f0-9]{40}$ ]]
           echo "base_tree_sha=$base_tree_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/heads/$base_branch" -f sha="$base_sha" >/dev/null
-          [[ "$(gh api "repos/$REPOSITORY/git/ref/heads/$base_branch" --jq .object.sha)" == "$base_sha" ]]
+          node .github/e2e/fixture-ref.mjs create "$base_branch" "$base_sha"
 
           blob_sha="$(jq -cn --arg content "$fixture_content" '{content:$content,encoding:"utf-8"}' \
             | gh api --method POST "repos/$REPOSITORY/git/blobs" --input - --jq .sha)"
@@ -1484,8 +1483,7 @@ jobs:
           [[ "$tree_sha" =~ ^[a-f0-9]{40}$ && "$head_sha" =~ ^[a-f0-9]{40}$ ]]
           echo "tree_sha=$tree_sha" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
-          gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$head_sha" >/dev/null
-          [[ "$(gh api "repos/$REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" == "$head_sha" ]]
+          node .github/e2e/fixture-ref.mjs create "$branch" "$head_sha"
 
           pr_title="DSH E2E checks $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
           pr_body="$(printf '%s\n\n%s' "$marker" "Temporary draft PR owned by the trusted GitHub integration harness.")"
@@ -1919,7 +1917,12 @@ jobs:
             set -euo pipefail
             [[ "$CHECKS_BRANCH" =~ ^dsh-e2e/checks-[1-9][0-9]*-[1-9][0-9]*$ ]]
             [[ "$FIXTURE_PATH" =~ ^\.github/dsh-e2e-fixtures/checks-[1-9][0-9]*-[1-9][0-9]*\.txt$ ]]
-            ref_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" --jq .object.sha 2>/dev/null)" || return 0
+            if ! ref_json="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" 2>/dev/null)"; then
+              jq -e '.status == "404" or .status == 404' <<<"$ref_json" >/dev/null && return 0
+              echo "Fixture ref preflight could not confirm absence." >&2
+              return 1
+            fi
+            ref_sha="$(jq -r .object.sha <<<"$ref_json")"
             [[ "$ref_sha" =~ ^[a-f0-9]{40}$ ]]
             [[ -z "$CHECKS_HEAD" || "$ref_sha" == "$CHECKS_HEAD" ]]
             commit_json="$(gh api "repos/$REPOSITORY/git/commits/$ref_sha")"
@@ -1936,15 +1939,19 @@ jobs:
             [[ "$blob_sha" =~ ^[a-f0-9]{40}$ ]]
             content="$(gh api "repos/$REPOSITORY/git/blobs/$blob_sha" --jq .content | tr -d '\n' | base64 --decode)"
             [[ "$content" == "DSH E2E checks head $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" ]]
-            gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BRANCH"
-            if gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BRANCH" >/dev/null 2>&1; then return 1; fi
+            node .github/e2e/fixture-ref.mjs delete "$CHECKS_BRANCH" "$ref_sha"
           )
 
           cleanup_base_branch() (
             set -euo pipefail
             [[ "$CHECKS_BASE_BRANCH" =~ ^dsh-e2e/checks-base-[1-9][0-9]*-[1-9][0-9]*$ ]]
             [[ "$FIXTURE_PATH" =~ ^\.github/dsh-e2e-fixtures/checks-[1-9][0-9]*-[1-9][0-9]*\.txt$ ]]
-            ref_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" --jq .object.sha 2>/dev/null)" || return 0
+            if ! ref_json="$(gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" 2>/dev/null)"; then
+              jq -e '.status == "404" or .status == 404' <<<"$ref_json" >/dev/null && return 0
+              echo "Fixture ref preflight could not confirm absence." >&2
+              return 1
+            fi
+            ref_sha="$(jq -r .object.sha <<<"$ref_json")"
             [[ "$ref_sha" =~ ^[a-f0-9]{40}$ ]]
             [[ -z "$CHECKS_BASE_SHA" || "$ref_sha" == "$CHECKS_BASE_SHA" ]]
             commit_json="$(gh api "repos/$REPOSITORY/git/commits/$ref_sha")"
@@ -1963,8 +1970,7 @@ jobs:
             [[ "$base_blob_sha" =~ ^[a-f0-9]{40}$ ]]
             content="$(gh api "repos/$REPOSITORY/git/blobs/$base_blob_sha" --jq .content | tr -d '\n' | base64 --decode)"
             [[ "$content" == "DSH E2E checks base $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" ]]
-            gh api --method DELETE "repos/$REPOSITORY/git/refs/heads/$CHECKS_BASE_BRANCH"
-            if gh api "repos/$REPOSITORY/git/ref/heads/$CHECKS_BASE_BRANCH" >/dev/null 2>&1; then return 1; fi
+            node .github/e2e/fixture-ref.mjs delete "$CHECKS_BASE_BRANCH" "$ref_sha"
           )
 
           if [[ -n "$ISSUE_NUMBER" || -n "$ISSUE_ID" ]]; then
